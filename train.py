@@ -55,7 +55,7 @@ def main(args):
     # ================================================
     if not torch.cuda.is_available():
         raise Exception('At least one gpu must be available.')
-    gpu = torch.device('cuda:0')
+    gpu = torch.device('cuda:1')
 
     # create result directory (if necessary)
     if not os.path.exists(args.result_dir):
@@ -67,20 +67,21 @@ def main(args):
     # load dataset
     trnsfm = transforms.Compose([
         transforms.Resize(args.cn_input_size),
-        transforms.RandomCrop((args.cn_input_size, args.cn_input_size)),
+        #transforms.RandomCrop((args.cn_input_size, args.cn_input_size)),
         transforms.ToTensor(),
     ])
     print('loading dataset... (it may take a few minutes)')
     train_dset = ImageDataset(
-        os.path.join(args.data_dir, 'train'),
-        trnsfm,
+        os.path.join(args.data_dir, 'train'), args.cn_input_size,
+        transform=trnsfm,
         recursive_search=args.recursive_search)
     test_dset = ImageDataset(
-        os.path.join(args.data_dir, 'test'),
-        trnsfm,
+        os.path.join(args.data_dir, 'test'), args.cn_input_size,
+        transform=trnsfm,
         recursive_search=args.recursive_search)
     train_loader = DataLoader(
         train_dset,
+        #batch_size=1,
         batch_size=(args.bsize // args.bdivs),
         shuffle=True)
 
@@ -137,10 +138,10 @@ def main(args):
     cnt_bdivs = 0
     pbar = tqdm(total=args.steps_1)
     while pbar.n < args.steps_1:
-        for x in train_loader:
+        for x, mask_less, mask in train_loader:
             # forward
             x = x.to(gpu)
-            mask = gen_input_mask(
+            """mask = gen_input_mask(
                 shape=(x.shape[0], 1, x.shape[2], x.shape[3]),
                 hole_size=(
                     (args.hole_min_w, args.hole_max_w),
@@ -149,11 +150,13 @@ def main(args):
                     (args.ld_input_size, args.ld_input_size),
                     (x.shape[3], x.shape[2])),
                 max_holes=args.max_holes,
-            ).to(gpu)
+            ).to(gpu)"""
+            mask = mask.to(gpu)
+            mask_less = mask_less.to(gpu)
             x_mask = x - x * mask + mpv * mask
             input = torch.cat((x_mask, mask), dim=1)
             output = model_cn(input)
-            loss = completion_network_loss(x, output, mask)
+            loss = completion_network_loss(x, output, mask_less, mask)
 
             # backward
             loss.backward()
@@ -171,10 +174,10 @@ def main(args):
                 if pbar.n % args.snaperiod_1 == 0:
                     model_cn.eval()
                     with torch.no_grad():
-                        x = sample_random_batch(
+                        x, mask, mask_more = sample_random_batch(
                             test_dset,
-                            batch_size=args.num_test_completions).to(gpu)
-                        mask = gen_input_mask(
+                            batch_size=args.num_test_completions)
+                        """mask = gen_input_mask(
                             shape=(x.shape[0], 1, x.shape[2], x.shape[3]),
                             hole_size=(
                                 (args.hole_min_w, args.hole_max_w),
@@ -182,9 +185,11 @@ def main(args):
                             hole_area=gen_hole_area(
                                 (args.ld_input_size, args.ld_input_size),
                                 (x.shape[3], x.shape[2])),
-                            max_holes=args.max_holes).to(gpu)
+                            max_holes=args.max_holes).to(gpu)"""
+                        x = x.to(gpu)
+                        mask = mask.to(gpu)
                         x_mask = x - x * mask + mpv * mask
-                        input = torch.cat((x_mask, mask), dim=1)
+                        input = torch.cat((x_mask, mask), dim=1).squeeze(0)
                         output = model_cn(input)
                         completed = poisson_blend(x_mask, output, mask)
                         imgs = torch.cat((
@@ -235,19 +240,20 @@ def main(args):
     cnt_bdivs = 0
     pbar = tqdm(total=args.steps_2)
     while pbar.n < args.steps_2:
-        for x in train_loader:
+        for x, mask_less, mask in train_loader:
             # fake forward
             x = x.to(gpu)
             hole_area_fake = gen_hole_area(
                 (args.ld_input_size, args.ld_input_size),
                 (x.shape[3], x.shape[2]))
-            mask = gen_input_mask(
+            """mask = gen_input_mask(
                 shape=(x.shape[0], 1, x.shape[2], x.shape[3]),
                 hole_size=(
                     (args.hole_min_w, args.hole_max_w),
                     (args.hole_min_h, args.hole_max_h)),
                 hole_area=hole_area_fake,
-                max_holes=args.max_holes).to(gpu)
+                max_holes=args.max_holes).to(gpu)"""
+            mask = mask.to(gpu)
             fake = torch.zeros((len(x), 1)).to(gpu)
             x_mask = x - x * mask + mpv * mask
             input_cn = torch.cat((x_mask, mask), dim=1)
@@ -288,10 +294,12 @@ def main(args):
                 if pbar.n % args.snaperiod_2 == 0:
                     model_cn.eval()
                     with torch.no_grad():
-                        x = sample_random_batch(
+                        x, mask, mask_less = sample_random_batch(
                             test_dset,
-                            batch_size=args.num_test_completions).to(gpu)
-                        mask = gen_input_mask(
+                            batch_size=args.num_test_completions)
+                        mask = mask.to(gpu)
+                        x = x.to(gpu)
+                        """mask = gen_input_mask(
                             shape=(x.shape[0], 1, x.shape[2], x.shape[3]),
                             hole_size=(
                                 (args.hole_min_w, args.hole_max_w),
@@ -299,7 +307,7 @@ def main(args):
                             hole_area=gen_hole_area(
                                 (args.ld_input_size, args.ld_input_size),
                                 (x.shape[3], x.shape[2])),
-                            max_holes=args.max_holes).to(gpu)
+                            max_holes=args.max_holes).to(gpu)"""
                         x_mask = x - x * mask + mpv * mask
                         input = torch.cat((x_mask, mask), dim=1)
                         output = model_cn(input)
@@ -336,20 +344,21 @@ def main(args):
     cnt_bdivs = 0
     pbar = tqdm(total=args.steps_3)
     while pbar.n < args.steps_3:
-        for x in train_loader:
+        for x, mask_less, mask in train_loader:
             # forward model_cd
             x = x.to(gpu)
             hole_area_fake = gen_hole_area(
                 (args.ld_input_size, args.ld_input_size),
                 (x.shape[3], x.shape[2]))
-            mask = gen_input_mask(
+            """mask = gen_input_mask(
                 shape=(x.shape[0], 1, x.shape[2], x.shape[3]),
                 hole_size=(
                     (args.hole_min_w, args.hole_max_w),
                     (args.hole_min_h, args.hole_max_h)),
                 hole_area=hole_area_fake,
-                max_holes=args.max_holes).to(gpu)
-
+                max_holes=args.max_holes).to(gpu)"""
+            mask = mask.to(gpu)
+            mask_less = mask_less.to(gpu)
             # fake forward
             fake = torch.zeros((len(x), 1)).to(gpu)
             x_mask = x - x * mask + mpv * mask
@@ -382,7 +391,7 @@ def main(args):
                 opt_cd.zero_grad()
 
             # forward model_cn
-            loss_cn_1 = completion_network_loss(x, output_cn, mask)
+            loss_cn_1 = completion_network_loss(x, output_cn, mask_less, mask)
             input_gd_fake = output_cn
             input_ld_fake = crop(input_gd_fake, hole_area_fake)
             output_fake = model_cd((input_ld_fake, (input_gd_fake)))
@@ -409,10 +418,10 @@ def main(args):
                 if pbar.n % args.snaperiod_3 == 0:
                     model_cn.eval()
                     with torch.no_grad():
-                        x = sample_random_batch(
+                        x, mask, mask_less = sample_random_batch(
                             test_dset,
-                            batch_size=args.num_test_completions).to(gpu)
-                        mask = gen_input_mask(
+                            batch_size=args.num_test_completions)
+                        """mask = gen_input_mask(
                             shape=(x.shape[0], 1, x.shape[2], x.shape[3]),
                             hole_size=(
                                 (args.hole_min_w, args.hole_max_w),
@@ -420,7 +429,9 @@ def main(args):
                             hole_area=gen_hole_area(
                                 (args.ld_input_size, args.ld_input_size),
                                 (x.shape[3], x.shape[2])),
-                            max_holes=args.max_holes).to(gpu)
+                            max_holes=args.max_holes).to(gpu)"""
+                        x = x.to(gpu)
+                        mask = mask.to(gpu)
                         x_mask = x - x * mask + mpv * mask
                         input = torch.cat((x_mask, mask), dim=1)
                         output = model_cn(input)

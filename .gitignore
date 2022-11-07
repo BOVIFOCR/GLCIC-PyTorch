@@ -2,3 +2,9 @@ __pycache__/
 .python-version
 .vscode/
 .DS_Store
+results/*
+datasets/*
+*.jpg
+nohup.out
+*.txt
+*.sh

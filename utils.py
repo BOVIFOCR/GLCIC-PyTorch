@@ -4,9 +4,18 @@ import torchvision.transforms as transforms
 import numpy as np
 import cv2
 
+def read_mask(mask_path):
+    bboxes = []
+    with open(mask_path, 'r') as fd:
+        lines = fd.readlines()
+    for line in lines:
+        line = line.strip('\n')
+        bbox = [int(x) for x in line.split(',')]
+        bboxes.append(bbox)
+    return bboxes
 
 def gen_input_mask(
-        shape, hole_size, hole_area=None, max_holes=1):
+        shape, bboxes, hole_area=None, max_holes=1, max_size=512):
     """
     * inputs:
         - shape (sequence, required):
@@ -35,9 +44,36 @@ def gen_input_mask(
             All the pixel values within holes are filled with 1.0,
             while the other pixel values are zeros.
     """
-    mask = torch.zeros(shape)
-    bsize, _, mask_h, mask_w = mask.shape
+    #mask = torch.zeros(shape)
+    #mask_loss = torch.zeros(shape)
+    bsize, mask_h, mask_w = shape
+    
+    if mask_w > mask_h:
+        max_h = max_size
+        max_w = int(mask_w*max_size/mask_h)
+    else: 
+        max_w = max_size
+        max_h = int(mask_h*max_size/mask_w)
+    h_factor = max_h / mask_h
+    w_factor = max_w / mask_w
+    
+    mask = torch.zeros((shape[0], max_w, max_h))
+    mask_loss = torch.zeros((shape[0], max_w, max_h))
+ 
+    #h_factor = w_factor = 1   
     for i in range(bsize):
+        for idx,bbox in enumerate(bboxes):
+            bbox = [int(bbox[0]*w_factor), int(bbox[1]*h_factor), 
+                    int((bbox[0]+bbox[2])*w_factor), int((bbox[1]+bbox[3])*h_factor)]
+            if idx % 2 == 0:
+                mask[i, bbox[1]:bbox[3], bbox[0]:bbox[2]] = 1.0
+
+            else:
+                mask_loss[i, bbox[1]:bbox[3], bbox[0]:bbox[2]] = 1.0
+    
+    #mask_loss[mask == 1] = 0.0
+
+    """for i in range(bsize):
         n_holes = random.choice(list(range(1, max_holes+1)))
         for _ in range(n_holes):
             # choose patch width
@@ -61,8 +97,8 @@ def gen_input_mask(
             else:
                 offset_x = random.randint(0, mask_w - hole_w)
                 offset_y = random.randint(0, mask_h - hole_h)
-            mask[i, :, offset_y: offset_y + hole_h, offset_x: offset_x + hole_w] = 1.0
-    return mask
+            mask[i, :, offset_y: offset_y + hole_h, offset_x: offset_x + hole_w] = 1.0"""
+    return mask, mask_loss
 
 
 def gen_hole_area(size, mask_size):
@@ -113,11 +149,19 @@ def sample_random_batch(dataset, batch_size=32):
     """
     num_samples = len(dataset)
     batch = []
+    mask_batch = []
+    mask_less_batch = []
     for _ in range(min(batch_size, num_samples)):
         index = random.choice(range(0, num_samples))
-        x = torch.unsqueeze(dataset[index], dim=0)
-        batch.append(x)
-    return torch.cat(batch, dim=0)
+        tpl = dataset[index]
+        x1 = torch.unsqueeze(tpl[0], dim=0)
+        x2 = torch.unsqueeze(tpl[1], dim=0)
+        x3 = torch.unsqueeze(tpl[2], dim=0)
+        batch.append(x1)
+        mask_less_batch.append(x2)
+        mask_batch.append(x3)
+    
+    return torch.cat(batch, dim=0), torch.cat(mask_less_batch, dim=0), torch.cat(mask_batch, dim=0)
 
 
 def poisson_blend(input, output, mask):
