@@ -119,22 +119,64 @@ def gen_hole_area(size, mask_size):
     offset_y = random.randint(0, mask_h - harea_h)
     return ((offset_x, offset_y), (harea_w, harea_h))
 
+def split_holes(shape, mask):
+    fake = np.array(shape)
+    real = np.array(shape)
+
+    regs = []
+    for i, reg in mask:
+        if i % 2 == 0:
+            regs.append([reg])
+        else:
+            regs[-1].append(reg)
+
+    random.shuffle(regs)
+    fake_regs = regs[0]
+    real_regs = regs[1]
+
+    for i, reg in fake_regs:
+        bbox = [int(bbox[0]*w_factor), int(bbox[1]*h_factor),
+            int((bbox[0]+bbox[2])*w_factor), int((bbox[1]+bbox[3])*h_factor)] 
+        if i % 2 == 0:
+            fake[i, bbox[1]:bbox[3], bbox[0]:bbox[2]] = 1.0
+        else:
+            fake[i, bbox[1]:bbox[3], bbox[0]:bbox[2]] = 0.0
+
+    for i, reg in real_regs:
+        bbox = [int(bbox[0]*w_factor), int(bbox[1]*h_factor),
+            int((bbox[0]+bbox[2])*w_factor), int((bbox[1]+bbox[3])*h_factor)]        
+        if i % 2 == 0:
+            real[i, bbox[1]:bbox[3], bbox[0]:bbox[2]] = 1.0
+        else:
+            real[i, bbox[1]:bbox[3], bbox[0]:bbox[2]] = 0.0
+
+    return fake, real
 
 def crop(x, area):
     """
     * inputs:
         - x (torch.Tensor, required)
                 A torch tensor of shape (N, C, H, W) is assumed.
-        - area (sequence, required)
+        - area (torch.Tensor, required)
+                Same shape as x, acts as a binary mask.
+
+        X area (sequence, required)
                 A sequence of length 2 ((X, Y), (W, H)) is assumed.
                 sequence[0] (X, Y) is the left corner of an area to be cropped.
                 sequence[1] (W, H) is its width and height.
     * returns:
             A torch tensor of shape (N, C, H, W) cropped in the specified area.
     """
-    xmin, ymin = area[0]
-    w, h = area[1]
-    return x[:, :, ymin: ymin + h, xmin: xmin + w]
+    idx = area.nonzero()
+    x_min = idx[:, 0].min()
+    x_max = idx[:, 0].max()
+    y_min = idx[:, 1].min()
+    y_max = idx[:, 1].max()
+    return x[:, :, x_min:x_max+1, y_min:y_max+1]
+    
+    #xmin, ymin = area[0]
+    #w, h = area[1]
+    #return x[:, :, ymin: ymin + h, xmin: xmin + w]
 
 
 def sample_random_batch(dataset, batch_size=32):

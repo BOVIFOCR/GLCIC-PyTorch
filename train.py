@@ -240,12 +240,13 @@ def main(args):
     cnt_bdivs = 0
     pbar = tqdm(total=args.steps_2)
     while pbar.n < args.steps_2:
-        for x, mask_less, mask in train_loader:
+        for x, hole_area_fake, hole_area_real in train_loader:
             # fake forward
             x = x.to(gpu)
-            hole_area_fake = gen_hole_area(
-                (args.ld_input_size, args.ld_input_size),
-                (x.shape[3], x.shape[2]))
+            #hole_area_fake, hole_area_real = split_holes(mask_less, mask)
+            #hole_area_fake = gen_hole_area(
+            #    (args.ld_input_size, args.ld_input_size),
+            #    (x.shape[3], x.shape[2]))
             """mask = gen_input_mask(
                 shape=(x.shape[0], 1, x.shape[2], x.shape[3]),
                 hole_size=(
@@ -253,7 +254,9 @@ def main(args):
                     (args.hole_min_h, args.hole_max_h)),
                 hole_area=hole_area_fake,
                 max_holes=args.max_holes).to(gpu)"""
-            mask = mask.to(gpu)
+            mask = hole_area_fake.to(gpu)
+            #mask_less = mask_less.to(gpu)
+            #mask[mask_less == 1] = 0
             fake = torch.zeros((len(x), 1)).to(gpu)
             x_mask = x - x * mask + mpv * mask
             input_cn = torch.cat((x_mask, mask), dim=1)
@@ -266,9 +269,9 @@ def main(args):
             loss_fake = bceloss(output_fake, fake)
 
             # real forward
-            hole_area_real = gen_hole_area(
-                (args.ld_input_size, args.ld_input_size),
-                (x.shape[3], x.shape[2]))
+            #hole_area_real = gen_hole_area(
+            #    (args.ld_input_size, args.ld_input_size),
+            #    (x.shape[3], x.shape[2]))
             real = torch.ones((len(x), 1)).to(gpu)
             input_gd_real = x
             input_ld_real = crop(input_gd_real, hole_area_real)
@@ -341,6 +344,8 @@ def main(args):
     # ================================================
     # Training Phase 3
     # ================================================
+    best_loss = 1e9
+    since = 0
     cnt_bdivs = 0
     pbar = tqdm(total=args.steps_3)
     while pbar.n < args.steps_3:
@@ -359,6 +364,7 @@ def main(args):
                 max_holes=args.max_holes).to(gpu)"""
             mask = mask.to(gpu)
             mask_less = mask_less.to(gpu)
+            mask[mask_less == 1] = 0
             # fake forward
             fake = torch.zeros((len(x), 1)).to(gpu)
             x_mask = x - x * mask + mpv * mask
@@ -435,6 +441,27 @@ def main(args):
                         x_mask = x - x * mask + mpv * mask
                         input = torch.cat((x_mask, mask), dim=1)
                         output = model_cn(input)
+                        
+                        # Calculate loss for early stopping.
+                        x_mask = x - x * mask_less + mpv * mask_less
+                        input = torch.cat((x_mask, mask), dim=1)
+                        output_cn = model_cn(input)
+
+                        c_cn_1_loss = completion_network_loss(x, output_cn, mask, mask_less)
+                        input_gd_fake = output_cn
+                        input_ld_fake = crop(input_gd_fake, hole_area_fake)
+                        output_fake = model_cd((input_ld_fake, (input_gd_fake)))
+                        c_cn_2_loss = bceloss(output_fake, real)
+                        c_cn_loss = (c_cn_1_loss + alpha * c_cn_2_loss) / 2.
+                        
+                        if c_cn_loss < best_loss:
+                            best_loss = c_cn_loss
+                            since = 0
+                        else:
+                            since += 1
+                            if since == 3:
+                                return
+
                         completed = poisson_blend(x_mask, output, mask)
                         imgs = torch.cat((
                             x.cpu(),

@@ -10,13 +10,14 @@ from PIL import Image
 import torch
 
 class ImageDataset(data.Dataset):
-    def __init__(self, data_dir, input_size, train=True, transform=None, recursive_search=False):
+    def __init__(self, data_dir, input_size, train=True, phase=1, transform=None, recursive_search=False):
         super(ImageDataset, self).__init__()
         self.data_dir = os.path.expanduser(data_dir)
         self.transform = transform
         self.imgpaths = self.__load_imgpaths_from_dir(self.data_dir, walk=recursive_search)
         self.input_size = input_size
         self.train = train
+        self.phase = phase
 
     def __len__(self):
         return len(self.imgpaths)
@@ -33,10 +34,13 @@ class ImageDataset(data.Dataset):
             img = self.transform(img)
 
         mask = read_mask(mask_path)
-        if self.train:
-            mask_less, mask = gen_input_mask((1, w, h), mask, max_size=self.input_size)
-        else:
-            mask, mask_less = gen_input_mask((1, w, h), mask, max_size=self.input_size)
+        if self.phase == 1:
+            if self.train:
+                mask_less, mask = gen_input_mask((1, w, h), mask, max_size=self.input_size)
+            else:
+                mask, mask_less = gen_input_mask((1, w, h), mask, max_size=self.input_size)
+        else: # mask_less == fake, mask == real
+            mask_less, mask = split_holes((1, w, h), mask)
 
         #mask = Resize((self.input_size, self.input_size))
         #mask_less = Resize((self.input_size, self.input_size))
