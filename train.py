@@ -74,7 +74,7 @@ def main(args):
     train_dset = ImageDataset(
         os.path.join(args.data_dir, 'train'), args.cn_input_size,
         transform=trnsfm,
-        recursive_search=args.recursive_search)
+        recursive_search=args.recursive_search, phase=1)
     test_dset = ImageDataset(
         os.path.join(args.data_dir, 'test'), args.cn_input_size,
         transform=trnsfm,
@@ -235,6 +235,16 @@ def main(args):
     model_cd = model_cd.to(gpu)
     opt_cd = Adadelta(model_cd.parameters())
     bceloss = BCELoss()
+
+    train_dset = ImageDataset(
+        os.path.join(args.data_dir, 'train'), args.cn_input_size,
+        transform=trnsfm,
+        recursive_search=args.recursive_search, phase=2)
+    train_loader = DataLoader(
+        train_dset,
+        #batch_size=1,
+        batch_size=(args.bsize // args.bdivs),
+        shuffle=True)
 
     # training
     cnt_bdivs = 0
